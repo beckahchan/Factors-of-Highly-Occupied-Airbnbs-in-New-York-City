@@ -1,0 +1,177 @@
+---
+title: "LR_ALC"
+output: html_document
+date: "2024-04-14"
+---
+
+```{r}
+library(dplyr)
+
+df <- read.csv("LASSOnlp.csv")
+head(df, 5)
+
+# Splitting the data into training and testing set
+set.seed(123)
+
+airbnb_train <- df %>% sample_frac(0.7) %>% filter(log_price > 0)
+
+airbnb_test <- anti_join(df, airbnb_train) %>% filter(log_price > 0)
+
+nrow(airbnb_train) + nrow(airbnb_test) == nrow(df %>% filter(log_price > 0))
+
+# training dataset has 15,354 observations
+# testing dataset has 6,580 observations
+```
+
+```{r}
+# Building my initial multiple linear regression model
+airbnb_mlr_1 <- lm(occupancyRatio ~., data = airbnb_train)
+sum_lr_1 <- summary(airbnb_mlr_1)
+sum_lr_1
+
+# MSE: 0.0091
+# R-squared: 0.2427
+# Adjusted R-squared: 0.2407
+# p-value < 0.05: log_price, accommodates, cleaning_fee, host_identity_verified, instant_bookable, number_of_reviews, age, Wireless.Internet, Kitchen, Heating, Smoke.detector, Hangers, Times.Square, New.York.City, bedroom.1
+
+# get the model residuals
+mlr_1_residuals <- airbnb_mlr_1$residuals
+
+# Plot the result
+hist(mlr_1_residuals)
+
+# The histogram looks skewed to the right; hence I cannot conclude the normality with enough confidence
+# Instead of the histogram, let's look at the residuals along the normal QQ plot
+# If there is normality, then the values should follow a straight line
+
+# plot the residuals
+qqnorm(mlr_1_residuals)
+
+# plot the QQ line
+qqline(mlr_1_residuals)
+
+# From the plot, I can observe that a few portions of the residuals lie in a straight line. 
+# Then, I can assume that the residuals of the model do not follow a normal distribution
+
+############## Model 2 ############## 
+
+# Building a second multiple linear regression model with only the selected variables that are considered to be significant by the model
+airbnb_mlr_2 <- lm(occupancyRatio ~ log_price + accommodates + cleaning_fee + host_identity_verified + instant_bookable + number_of_reviews + age + Wireless.Internet + Kitchen + Heating + Smoke.detector + Hangers + Times.Square + New.York.City + bedroom.1, data = airbnb_train)
+sum_lr_2 <- summary(airbnb_mlr_2)
+sum_lr_2
+
+# MSE: 0.0091
+# R-squared: 0.2405
+# Adjusted R-squared: 0.2398
+# p-value < 0.05: log_price, accommodates, cleaning_fee, host_identity_verified, instant_bookable, number_of_reviews, age, Wireless.Internet, Kitchen, Heating, Smoke.detector, Hangers, Times.Square, New.York.City
+
+# Plot the result
+mlr_2_residuals <- airbnb_mlr_2$residuals
+hist(mlr_2_residuals)
+
+# The histogram looks skewed to the right; hence I cannot conclude the normality with enough confidence
+# Instead of the histogram, let's look at the residuals along the normal QQ plot
+# If there is normality, then the values should follow a straight line
+
+# plot the residuals
+qqnorm(mlr_2_residuals)
+
+# plot the QQ line
+qqline(mlr_2_residuals)
+
+# From the second plot, I don't see a significant change on the straight line.
+
+# Let's run a ANOVA test of the two multiple linear regression models
+# Null hypothesis: the variables that I removed previously have no significance
+# Alternative hypothesis: the variables that I removed previously are significant
+anova(airbnb_mlr_1, airbnb_mlr_2)
+
+# From the ANOVA result, I observe that the p-value (0.01895) is less than 0.05, 
+# so I reject the null hypothesis, meaning that the second model is not an improvement of the first one
+
+# A variable will be significant if its p-value is less than 0.05
+# In addition to providing that information about the model it also renders the adjusted R-squared, which evaluates the performance of models against each other
+
+# The initial multiple linear regression model has an adjusted R-squared of 0.2407, which is higher than the second model's adjusted R-squared (0.2398)
+# This means that the initial model with all the predictors is better than the second model
+```
+
+```{r}
+library(MASS)
+
+# Next, I will use Step-wise regression using AIC for variable selection and see how the models differ in from each other
+# Step-wise selection using AIC, both forward and backward direction
+null <- lm(occupancyRatio ~ 1, data = airbnb_train)
+full <- lm(occupancyRatio ~., data = airbnb_train)
+step(null, scope = list(lower = null, upper = full), direction = "both")
+
+# An AIC score is a number used to determine which machine learning model is best for a given data set in situations where one cannot easily test a data set
+# The lower the AIC score the better: AIC = -72159.25
+
+# From the result:
+# Selected variables: age, number_of_reviews, instant_bookable, cleaning_fee, host_identity_verified, log_price, Wireless.Internet, Heating, Hangers, Kitchen, accommodates, Smoke.detector, New.York.City, Times.Square, latitude, private, Prospect.Park, apt, hostAge, TV, brooklyn, Broadway
+
+# Building a model using the selected co-variables:
+airbnb_aic <- lm(occupancyRatio ~ age + number_of_reviews + instant_bookable + cleaning_fee + host_identity_verified + log_price + Wireless.Internet + Heating + Hangers + Kitchen + accommodates + Smoke.detector + New.York.City + Times.Square + latitude + private + Prospect.Park + apt + hostAge + TV + brooklyn + Broadway, data = airbnb_train)
+
+sum_aic <- summary(airbnb_aic)
+sum_aic
+
+# MSE: 0.0091
+# R-squared: 0.2416
+# Adjusted R-squared: 0.2405
+
+# With my AIC model, I got a slightly lower adjusted R-squared value (0.2405) compared to my initial multiple linear regression model (0.2407)
+```
+```{r}
+# I will use Best Subset Regression model for variable selection
+library(leaps)
+
+bestsub <- regsubsets(occupancyRatio ~., data = airbnb_train, nvmax = 15)
+summary(bestsub)
+
+# An asterisk("*") indicates that a given variable is included in the corresponding model. Here, I fit up to a 15-variable model
+# Selected variables: log_price, accommodates, cleaning_fee, host_identity_verified, instant_bookable, latitude, number_of_reviews, age, Wireless.Internet, Kitchen, Heating, Smoke.detector, Hangers, Times.Square, New.York.City
+
+# I will build a model using the above mentioned co-variates
+airbnb_bestsub <- lm(occupancyRatio ~ log_price + accommodates + cleaning_fee + host_identity_verified + instant_bookable + latitude + number_of_reviews + age + Wireless.Internet + Kitchen + Heating + Smoke.detector + Hangers + Times.Square + New.York.City, data = airbnb_train)
+
+sum_bestsub <- summary(airbnb_bestsub)
+sum_bestsub
+
+# MSE: 0.0091
+# R-squared: 0.2407
+# Adjusted R-squared: 0.2399
+```
+
+```{r}
+# In order to pick a model from the ones that I have built, I will do a comparison MSPE and Adjusted R-squared of all the models and choose the model with the best combination of both
+
+results <- data.frame(Model = c("Initial Multiple Linear Regression Model", "Multiple Linear Regression Model 2", "StepWise Regression Using AIC", "Best Subset Regression Model"), MSE = c(0.0091, 0.0091, 0.0091, 0.0091), R_Squared = c(0.2427, 0.2405, 0.2416, 0.2407), Adjusted_R_Squared = c(0.2407, 0.2398, 0.2405, 0.2399))
+results
+
+# The initial multiple linear regression model has the best combination of MSE (0.0091) and Adjusted R-Squared (0.2407)
+```
+```{r}
+# To evaluate how the model performs on future data, I use predit() to get the predicted values from the test set
+library(boot)
+
+pred <- predict(object = airbnb_mlr_1, newdata = airbnb_test)
+
+# Mean Squared Error (MSE) of the final model: 0.0085
+mean((pred - airbnb_test$occupancyRatio)^2)
+
+# Mean Absolute Error (MAE) of the final model - test data
+mean(abs(pred - airbnb_test$occupancyRatio))
+
+# Cross Validation of the final selected model
+# Mean Squared Prediction Error (MSPE) of the full data
+full_df <- glm(occupancyRatio ~., data = df)
+cv.glm(data = df, glmfit = full_df, K = 3)$delta[2]
+
+### Comparing the MSE of test data set which is equal to 0.0085 and the MSPE of the full data is 0.0089,
+### we can see that the values are almost similar. Hence the variables that we have selected for the mdoel are good estimators of the dependent variable.
+```
+
+
+
