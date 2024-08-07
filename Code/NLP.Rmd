@@ -18,7 +18,7 @@ pacman::p_load_gh("trinker/entity")
 library(entity)
 
 #import data
-data <- read.csv("data_nlp.csv", sep = ",", header = TRUE)
+data <- read.csv("cleaned_data.csv", sep = ",", header = TRUE)
 
 ## CLEANING TEXT
 #pre-processing text - leave only alphanumeric characters + '
@@ -77,7 +77,7 @@ for (word in top10words_description){
   }
 }
 
-.csv(topwords_description_df, "description.csv", row.names=FALSE)
+write.csv(topwords_description_df, "description.csv", row.names=FALSE)
 
 #create df with dummy variables for top 10 words in name and export as .csv
 topwords_name_df <- cleaned_data
@@ -93,7 +93,7 @@ for (word in top10words_name){
   }
 }
 
-.csv(topwords_name_df, "name.csv", row.names=FALSE)
+write.csv(topwords_name_df, "name.csv", row.names=FALSE)
 
 #create plots of top 10 common words
 tokens_description %>% 
@@ -153,6 +153,6 @@ top_locations %>%
   coord_flip()  +
   theme(text = element_text(size=15))
 
-.csv(NER_df, "locations_df.csv", row.names=FALSE)
+write.csv(NER_df, "locations_df.csv", row.names=FALSE)
 
 ```
