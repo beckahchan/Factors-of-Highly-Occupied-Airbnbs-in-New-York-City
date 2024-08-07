@@ -1,0 +1,5 @@
+After downloading all the data from the "data" folder and installing all of the necessary libraries, 
+begin by cleaning up the data using Preprocessing.Rmd. 
+Then move into adding the NLP columns using NLP.Rmd. 
+Next use PCAandLASSO.Rmd for feature selection, 
+and this will bring you to the actual analysis.
