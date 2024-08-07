@@ -1,0 +1,86 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+data = read.csv("cleaned_data.csv")
+
+# harmonize true/false data
+data$cleaning_fee <- ifelse(data$cleaning_fee == "True", 1, 0)
+data$host_has_profile_pic <- ifelse(data$host_has_profile_pic == "t", 1, 0)
+data$host_identity_verified <- ifelse(data$host_identity_verified == "t", 1, 0)
+data$instant_bookable <- ifelse(data$instant_bookable == "t", 1, 0)
+
+
+# remove redundant/not useful columns - put name and description back in later for NLP
+pcadata <- subset(data, select = -c(amenities, first_review, last_review, host_since, name, description))
+lassodata <- subset(data, select = -c(amenities, first_review, last_review, host_since, name, description))
+
+
+# remove categorical variables for now
+pcadata <- subset(pcadata, select = -c(bed_type, cancellation_policy, city, host_response_rate, neighbourhood, zipcode, property_type, room_type))
+# remove binary variables for now
+pcadata <- subset(pcadata, select = -c(cleaning_fee, host_identity_verified, host_has_profile_pic, instant_bookable))[1:12]
+# do not include dependent variable
+pcadata <- subset(pcadata, select = -c(occupancyRatio))
+
+# numeric
+pcadata <- sapply(pcadata, as.numeric)
+# remove rows missing data
+pcadata <- na.omit(pcadata)
+head(pcadata)
+```
+
+
+```{r}
+# PCA
+pca <- prcomp(pcadata[,1:ncol(pcadata)], scale=TRUE)
+summary(pca)
+screeplot(pca, type="lines",col="blue")
+```
+```{r}
+# Using up to PCA5 as cumulative proportion is >70%
+pcadata$occupancyRatio <- data$occupancyRatio
+occupancyRatio <- data$occupancyRatio
+as.data.frame(cbind(pca$x[,1:5],occupancyRatio))
+df_pca <- as.data.frame(cbind(pca$x[,1:5],occupancyRatio))
+model <- lm(occupancyRatio~.,df_pca)
+summary(model)
+```
+
+```{r}
+# location
+nlp_location <- read.csv("locations_df.csv",sep = ",",header = TRUE)
+nlp_location <- nlp_location[, c((ncol(nlp_location) - 9):ncol(nlp_location))]
+
+# name
+nlp_name <- read.csv("name.csv",sep = ",",header = TRUE)
+nlp_name <- nlp_name[, c((ncol(nlp_name) - 9):ncol(nlp_name))]
+
+# description
+nlp_description  = read.csv("description.csv",sep = ",",header = TRUE)
+nlp_description <- nlp_description[, c((ncol(nlp_description) - 9):ncol(nlp_description))]
+
+# bind
+lassodata <- cbind(lassodata, nlp_location)
+lassodata <- cbind(lassodata, nlp_name)
+lassodata <- cbind(lassodata, nlp_description)
+
+# ADDED LATER - no occupancyRatio > 1 as this is not possible
+lassodata <- subset(lassodata, occupancyRatio <= 1)
+
+# LASSO
+set.seed(777)
+library(glmnet)
+lassodata_matrix <- as.matrix(lassodata)
+
+lasso <- cv.glmnet(x=as.matrix(subset(lassodata, select = -c(occupancyRatio))),y=lassodata$occupancyRatio, data=lassodata_matrix, alpha=1,type.measuere='mse', standardize=TRUE)
+print(coef(lasso, s=lasso$lambda.min))
+```
+```{r}
+final = subset(lassodata, select=c("occupancyRatio", "log_price", "accommodates", "cleaning_fee", "host_has_profile_pic","host_identity_verified", "instant_bookable", "latitude", "longitude", "number_of_reviews", "age", "hostAge", "Wireless.Internet", "Kitchen", "Heating", "Essentials", "Air.conditioning", "Smoke.detector", "TV", "Hangers", "Shampoo", "Manhattan", "Central.Park", "Times.Square", "New.York.City", "Prospect.Park", "East.Village", "Broadway", "private", "apartment", "apt", "cozy", "br", "spacious", "studio", "brooklyn", "apartment.1", "bedroom.1", "kitchen", "bed", "walk", "private.1", "park.1"))
+
+final 
+write.csv(final, "LASSOnlp.csv", row.names=FALSE)
+```
+
