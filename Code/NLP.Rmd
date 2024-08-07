@@ -1,0 +1,158 @@
+---
+title: "NLP"
+output: html_notebook
+---
+```{r}
+#load libraries
+library(dplyr)
+library(ggplot2)
+library(tidytext)
+library(stringr) 
+library(tidyr)   
+library(SnowballC)
+library(kableExtra)
+library(textdata)
+#library(openNLP)
+if (!require("pacman")) install.packages("pacman")
+pacman::p_load_gh("trinker/entity")
+library(entity)
+
+#import data
+data <- read.csv("data_nlp.csv", sep = ",", header = TRUE)
+
+## CLEANING TEXT
+#pre-processing text - leave only alphanumeric characters + '
+cleaned_data <- data %>%
+  filter(str_detect(description, "^[^>]+[A-Za-z\\d]") | description !=" ") %>%
+  filter(str_detect(name, "^[^>]+[A-Za-z\\d]") | name !=" ")
+cleaned_data$description <- gsub("[^[:alnum:][:space:]']", " ", cleaned_data$description)
+cleaned_data$description <- gsub("[[:digit:]]+", " ", cleaned_data$description)
+cleaned_data$name <- gsub("[^[:alnum:][:space:]']", " ", cleaned_data$name)
+cleaned_data$name <- gsub("[[:digit:]]+", " ", cleaned_data$name)
+
+#tokenization - break down into individual words
+tokens_description <- cleaned_data %>%
+  select(description, occupancyRatio) %>%
+  unnest_tokens(word, description)
+
+tokens_name <- cleaned_data %>%
+  select(name, occupancyRatio) %>%
+  unnest_tokens(word, name)
+
+#remove stop words - remove common words (eg. the, of, and) not useful for analysis
+tokens_description <- tokens_description %>% 
+  anti_join(stop_words, "word")
+
+tokens_name <- tokens_name %>% 
+  anti_join(stop_words, "word")
+```
+
+```{r}
+## ANALYSIS
+#table of words ranked by occurrence and list of top 10 words
+topwords_name <- tokens_name %>% 
+  group_by(word) %>% 
+  summarize(occurrences = n())
+topwords_name <- topwords_name[order(-topwords_name$occurrences),]
+top10words_name <- topwords_name$word[1:10]
+
+topwords_description <- tokens_description %>% 
+  group_by(word) %>% 
+  summarize(occurrences = n())
+topwords_description <- topwords_description[order(-topwords_description$occurrences),]
+top10words_description <- topwords_description$word[1:10]
+
+#create df with dummy variables for top 10 words in description and export as .csv
+topwords_description_df <- cleaned_data
+
+for (i in top10words_description){
+  topwords_description_df[[i]] <- numeric(nrow(topwords_description_df))
+}
+
+for (word in top10words_description){
+  for (row in 1:nrow(topwords_description_df)){
+    if (grepl(word, topwords_description_df$description[row])){
+      topwords_description_df[[word]][row] <- 1
+    }
+  }
+}
+
+.csv(topwords_description_df, "description.csv", row.names=FALSE)
+
+#create df with dummy variables for top 10 words in name and export as .csv
+topwords_name_df <- cleaned_data
+for (i in top10words_name){
+  topwords_name_df[[i]] <- numeric(nrow(topwords_name_df))
+}
+
+for (word in top10words_name){
+  for (row in 1:nrow(topwords_name_df)){
+    if (grepl(word, topwords_name_df$name[row])){
+      topwords_name_df[[word]][row] <- 1
+    }
+  }
+}
+
+.csv(topwords_name_df, "name.csv", row.names=FALSE)
+
+#create plots of top 10 common words
+tokens_description %>% 
+  count(word, sort = TRUE) %>% 
+  top_n(10, n) %>%
+  mutate(word = reorder(word, n)) %>% 
+  ggplot(aes(word, n)) + 
+  geom_col() +
+  labs(title = "Top 10 Words in Description", y = "number of occurrences") +
+  coord_flip()  +
+  theme(text = element_text(size=14))
+```
+```{r}
+tokens_name %>% 
+  count(word, sort = TRUE) %>% 
+  top_n(10, n) %>%
+  mutate(word = reorder(word, n)) %>% 
+  ggplot(aes(word, n)) + 
+  geom_col()+ 
+  labs(title = "Top 10 Words in Name", y = "number of occurrences") +
+  coord_flip() +
+  theme(text = element_text(size=15))
+```
+```{r}
+#Named Entity Recognition
+cleaned_data$locations <- location_entity(cleaned_data$description)
+
+top_locations <- NULL
+top_locations$locations <- unlist(cleaned_data$locations)
+top_locations <- as.data.frame(top_locations) %>% 
+  count(locations)
+top_locations <- top_locations[order(-top_locations$n),]
+top10_NER <- top_locations$location[1:10]
+
+#create new df with locations
+NER_df <- cleaned_data[1:30]
+for (i in top10_NER){
+  NER_df[[i]] <- numeric(nrow(NER_df))
+}
+
+for (entity in top10_NER){
+  for (row in 1:nrow(NER_df)){
+    description <- gsub("[{}\"]", "", NER_df$description[row])
+    if (grepl(entity, NER_df$description[row])){
+      NER_df[[entity]][row] <- 1
+    }
+  }
+}
+
+#plot of top locations
+top_locations %>% 
+  top_n(10, n) %>%
+  mutate(locations = reorder(locations, n)) %>% 
+  ggplot(aes(locations, n)) + 
+  geom_col()+ 
+  labs(title = "Top 10 Locations", y = "number of occurrences") +
+  coord_flip()  +
+  theme(text = element_text(size=15))
+
+.csv(NER_df, "locations_df.csv", row.names=FALSE)
+
+```
