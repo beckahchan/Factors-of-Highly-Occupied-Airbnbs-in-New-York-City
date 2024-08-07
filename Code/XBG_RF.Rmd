@@ -1,0 +1,146 @@
+---
+title: "R Notebook - XGBOOST AND RANDOM FOREST FOR OCCUPANCYRATIO"
+
+---
+```{r}
+library(caret)
+library(xgboost)
+library(pdp)
+library(dplyr)
+library(randomForest)
+
+#this code block is to be run after PCAandLASSO.Rmd 
+final <- read.csv("LASSOnlp.csv")
+final <- subset(final, occupancyRatio <= 1)
+final <- final[, !colnames(final) %in% c("latitude", "longitude")]
+
+# Split data into train and test sets 
+set.seed(42) 
+train_indices <- sample(1:nrow(final), 0.7*nrow(final))
+train_data <- final[train_indices, ]
+test_data <- final[-train_indices, ]
+
+# Define predictors  and target variable
+predictors <- names(train_data)[!names(train_data) %in% "occupancyRatio"]
+target <- "occupancyRatio"
+
+# Convert data to DMatrix format required by XGBoost
+dtrain <- xgb.DMatrix(data = as.matrix(train_data[predictors]), label = train_data[[target]])
+dtest <- xgb.DMatrix(data = as.matrix(test_data[predictors]), label = test_data[[target]])
+
+#XGBoost parameters
+params <- list(
+  objective = "reg:squarederror", 
+  eval_metric = "rmse",            
+  eta = 0.01,                        # Learning rate
+  max_depth = 10,                    # Max depth of each tree
+  subsample = 0.8,                  # Subsample ratio of the training instances
+  colsample_bytree = 0.8            # Subsample ratio of columns when constructing each tree
+)
+
+#XGBoost model
+xgb_model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 100,  # Number of boosting rounds
+  verbose = 0     # Disable verbose output
+)
+
+predictions <- predict(xgb_model, dtest)
+
+# Evaluate model performance (Root Mean Squared Error)
+mse <- mean((predictions - test_data[[target]])^2)
+cat("MSE:", mse)
+
+summary(xgb_model)
+
+# Scatter Plot of Predictions vs. Actual Values
+plot(predictions, test_data$occupancyRatio, 
+     xlab = "Predicted Occupancy Ratio", 
+     ylab = "Actual Occupancy Ratio",
+     main = "Actual vs. Predicted Occupancy Ratio",
+     pch = 19, col = "grey")
+abline(a = 0, b = 1, col = "red", lwd = 2)
+legend("topleft", legend = "Prediction Line", col = "red", pch = 20, bty = "n")
+
+# Distribution of Residuals
+residuals <- predictions - test_data[[target]]
+#hist(residuals, breaks = 15, main = "Distribution of Residuals", xlab = "Residuals")
+residuals <- predictions - test_data[[target]]
+
+# Exclude values from -0.6 to -0.3 since they have very low counts
+filtered_residuals <- residuals[!(residuals < -0.3)]
+
+# Plot histogram of filtered residuals
+hist(filtered_residuals, breaks = 15, main = "Distribution of Residuals", xlab = "Residuals")
+
+# Feature Importance Plot
+importance_model <- xgb.importance(model = xgb_model)
+importance_model_sorted <- importance_model[order(-importance_model$Gain), ]
+top_5_importance <- importance_model_sorted[1:5, ]
+importance_model_xgb <- xgb.importance(model = xgb_model)$Gain
+ggplot(data = top_5_importance, aes(x = reorder(Feature, -Gain), y = Gain)) +
+  geom_bar(stat = "identity", fill = "grey") + 
+  theme_minimal() +  # Use a minimal theme
+  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_rect(fill = "white")) + 
+  labs(title = "XG Boosted Feature Importance (Top 5)", x = "Features", y = "Gain")
+
+# Calculate Gini impurity index of XGBoost
+gini_impurity_xgb <- 1 - sum((importance_model_xgb / sum(importance_model_xgb))^2)
+
+# Print the Gini impurity index
+print(paste("Gini Impurity Index of XGBoost:", gini_impurity_xgb))
+
+
+
+###random forest
+# Train the random forest model
+rf_model <- randomForest(x = train_data[predictors], 
+                         y = train_data[[target]],
+                         ntree = 500,     
+                         mtry=6,
+                        
+                         importance = TRUE)  
+rf_feature_names <- predictors
+
+# Get feature importances from the model
+rf_feature_importances <- rf_model$importance[,"IncNodePurity"]
+
+# Get the indices of the top 5 features
+rf_top5_indices <- order(rf_feature_importances, decreasing = TRUE)[1:5]
+
+rf_top5_features <- rf_feature_names[rf_top5_indices]
+rf_top_5_importance <- data.frame(Feature = rf_top5_features, Gain = rf_feature_importances[rf_top5_indices])
+
+
+# Plotting the histogram of top 5 features using ggplot2
+ggplot(data = rf_top_5_importance, aes(x = reorder(Feature, -Gain), y = Gain)) +
+  geom_bar(stat = "identity", fill = "grey") + 
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_rect(fill = "white")) + 
+  labs(title = "Random Forest Feature Importance (Top 5)", x = "Features", y = "Gain")
+
+# Print the model summary
+print(rf_model)
+
+# Make predictions
+rf_predictions <- predict(rf_model, newdata = test_data)
+
+# Evaluate model performance
+mse_rf <- mean((rf_predictions - test_data[[target]])^2)
+cat("MSE:", mse_rf, "\n")
+
+# Calculate Gini impurity index of Random Forest
+gini_impurity_rf <- 1 - sum((rf_feature_importances / sum(rf_feature_importances))^2)
+
+# Print the Gini impurity index
+print(paste("Gini Impurity Index of Random Forest:", gini_impurity_rf))
+
+```
+
